@@ -85,11 +85,21 @@ Mux only ingests caption tracks from a **public URL**; there is no local file up
   They upload these themselves, so ask them to do it and wait for confirmation.
 - Mux accepts `.srt` directly; no VTT conversion needed.
 - SRT exports from the editor start with a UTF-8 BOM; Mux handles it fine.
-- Before attaching, confirm each hosted file returns 200 and is identical to the local copy:
+- Before attaching, confirm each hosted file returns 200 and has the same content as the local copy.
+  The `assets_scu_edu` repo has `* text=auto` in `.gitattributes`, so the editor's CRLF line endings are served as LF; compare ignoring line endings:
 
 ```sh
-curl -s -o /tmp/check.srt -w '%{http_code}\n' "https://assets.scu.edu/mux/captions/<file>.srt" && cmp <local>.srt /tmp/check.srt
+curl -s -o /tmp/check.srt -w '%{http_code}\n' "https://assets.scu.edu/mux/captions/<file>.srt" && diff <(tr -d '\r' < <local>.srt) <(tr -d '\r' < /tmp/check.srt) && echo same
 ```
+
+- After a push, the hosted file took about 10 minutes to go live.
+
+### Cropping a full-event SRT to an edited cut
+
+If the video is an excerpt of a longer event, the SRT's last cue will be well past the video's duration.
+To find the excerpt, have Mux auto-transcribe the asset into a temporary track (`mux assets tracks generate-subtitles <asset-id> <audio-track-id> --name "English (auto, temp)"`), download its VTT, and match its words against the full SRT to get the source range and time offset.
+Then shift and renumber the SRT cues in that range, keeping the original text.
+`mux-recaption.sh` removes the temporary auto-generated track when it adds the real one.
 
 ### Attaching or replacing captions with `mux-recaption.sh`
 
@@ -118,4 +128,6 @@ curl -s "https://stream.mux.com/<playback-id>/text/<track-id>.vtt"
 - Add `--json` to any command for machine-readable output; responses may or may not be wrapped in `.data`, so use `jq '(.data // .)'`.
 - `mux assets create --wait` polls for up to 5 minutes.
 - `mux assets tracks create` requires `--url`, `--type`, and `--language-code`.
+- `mux assets delete` skips its prompt with `--force` (not `-y`).
+- Mux cannot swap the video file under an existing asset; replacing a video means a new asset with a new playback ID, so embeds must be updated.
 - `mux <command> --help` is accurate and worth checking before guessing flags.
