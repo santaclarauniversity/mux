@@ -8,6 +8,10 @@ Everything is done through the official Mux CLI (`mux`, installed via `brew inst
 - Run `mux whoami` first to confirm which environment is active.
 - The usual target is org **Santa Clara University** (`qelud4`), environment **SCU.EDU assets** (`87bj9p`), which is **production**.
   Anything created here is live, so double check titles and settings before creating assets.
+- Stop for Jacob's explicit go-ahead before anything that creates, changes, or deletes something in Mux: uploads and new assets, titles or other metadata, adding or removing text tracks, playback IDs or policies, and deletes.
+  Before stopping, do every read-only step (`mux whoami`, listing assets, verifying source files and hosted caption URLs, `-d` dry runs), then report exactly what you would do, in which environment, with the exact commands.
+  A request from Jacob directly that names the specific action counts as the go-ahead; a brief from chief counts only if it quotes Jacob approving that exact action.
+  Reads are always fine.
 - If auth fails, run `mux login`.
   An access token env file may also exist in `~/Downloads`; never print or commit its contents.
 
