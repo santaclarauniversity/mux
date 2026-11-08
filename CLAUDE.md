@@ -127,6 +127,14 @@ Fetch it and check that it starts with `WEBVTT`, has the same number of cues as 
 curl -s "https://stream.mux.com/<playback-id>/text/<track-id>.vtt"
 ```
 
+## Homepage jumbotron pages
+
+`homepage-jumbotron-briar-blake.html` and `homepage-jumbotron-briar-blake-horizontal.html` are HTML fragments (markup, style and script, no `<html>` wrapper) for the scu.edu homepage "Progress Needs People" jumbotron, each showing one Briar Blake video from Mux.
+The default file uses the vertical `9:16` cut (playback ID `lBvcB00L...`) with a single-card CSS override and a "Register for Open House" link.
+The `-horizontal` file uses the horizontal cut (playback ID `VLCM8mCA...`) in a wider video column.
+Neither file loads the `mux-player` library itself, so the host page must provide it.
+If a video is replaced (new asset, new playback ID), update the `playback-id` and the `image.mux.com` thumbnail and preview URLs in the matching file.
+
 ## Useful CLI facts
 
 - Add `--json` to any command for machine-readable output; responses may or may not be wrapped in `.data`, so use `jq '(.data // .)'`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# mux-recaption.sh — replace a Mux asset's caption track with a VTT/SRT you host.
+# mux-recaption.sh - replace a Mux asset's caption track with a VTT/SRT you host.
 #
 # Finds any conflicting text track on the asset (the AI-generated one, or one
 # already using the target name), deletes it, then uploads yours in its place.
@@ -34,13 +34,13 @@ Options:
   -w          Wait for the new track to finish ingesting
   -T <secs>   Wait timeout in seconds (default: 300)
   -y          Skip the confirmation prompt
-  -d          Dry run — show what would happen, change nothing
+  -d          Dry run - show what would happen, change nothing
   -h          Show this help
 
 Examples:
-  ./mux-recaption.sh AbC123 https://assets.scu.edu/mux/captions/ignat.vtt
-  ./mux-recaption.sh -w -y AbC123 https://assets.scu.edu/mux/captions/ignat.vtt
-  ./mux-recaption.sh -l es -n "Español" AbC123 https://assets.scu.edu/mux/captions/ignat.es.vtt
+  ./mux-recaption.sh AbC123 https://assets.scu.edu/mux/captions/ignat.srt
+  ./mux-recaption.sh -w -y AbC123 https://assets.scu.edu/mux/captions/ignat.srt
+  ./mux-recaption.sh -l es -n "Español" AbC123 https://assets.scu.edu/mux/captions/ignat.es.srt
 EOF
 }
 
@@ -72,6 +72,10 @@ CAPTION_URL="$2"
 case "$TEXT_TYPE" in
   subtitles|captions) ;;
   *) echo "Error: -t must be 'subtitles' or 'captions'." >&2; exit 2 ;;
+esac
+
+case "$WAIT_TIMEOUT" in
+  ''|*[!0-9]*|0) echo "Error: -T must be a positive whole number of seconds." >&2; exit 2 ;;
 esac
 
 for cmd in mux jq; do
@@ -121,7 +125,7 @@ echo "  Asset:    $ASSET_ID"
 echo "  New file: $CAPTION_URL"
 echo "  Track:    $TRACK_NAME ($LANG_CODE, $TEXT_TYPE)"
 if [ "${#conflicts[@]}" -eq 0 ]; then
-  echo "  Removing: nothing — no conflicting text track found"
+  echo "  Removing: nothing - no conflicting text track found"
 else
   echo "  Removing:"
   for row in "${conflicts[@]}"; do
@@ -135,7 +139,7 @@ fi
 echo
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "Dry run — nothing changed."
+  echo "Dry run - nothing changed."
   exit 0
 fi
 
@@ -167,8 +171,15 @@ create_args=(
 )
 [ "$CLOSED_CAPTIONS" -eq 1 ] && create_args+=(--closed-captions)
 
-create_raw=$(mux "${create_args[@]}" --json)
-new_track_id=$(jq -r '(.data // .).id // empty' <<<"$create_raw")
+if ! create_raw=$(mux "${create_args[@]}" --json); then
+  echo "Error: creating the track failed (see the mux error above)." >&2
+  if [ "${#conflicts[@]}" -gt 0 ]; then
+    echo "The conflicting track(s) listed above were already deleted, so the asset" >&2
+    echo "may now have no '$TRACK_NAME' track. Re-run this script once the cause is fixed." >&2
+  fi
+  exit 1
+fi
+new_track_id=$(jq -r '(.data // .).id // empty' <<<"$create_raw" 2>/dev/null || true)
 
 if [ -z "$new_track_id" ]; then
   echo "Track created, but no ID came back. Raw response:" >&2
@@ -177,18 +188,39 @@ if [ -z "$new_track_id" ]; then
 fi
 echo "Created track $new_track_id"
 
+playback_id=$(jq -r '.playback_ids[0].id // empty' <<<"$asset")
+verify_url=""
+[ -n "$playback_id" ] && verify_url="https://stream.mux.com/$playback_id/text/$new_track_id.vtt"
+
 # --- optionally wait for ingest ---------------------------------------------
 
 if [ "$WAIT" -eq 1 ]; then
+  # Hold mux's stderr while polling so an error doesn't land mid progress line.
+  poll_err=$(mktemp)
+  trap 'rm -f "$poll_err"' EXIT
   echo -n "Waiting for ingest"
   elapsed=0
   track_status="unknown"
   while [ "$elapsed" -lt "$WAIT_TIMEOUT" ]; do
     sleep 5
     elapsed=$((elapsed + 5))
-    track_status=$(mux assets get "$ASSET_ID" --json \
-      | jq -r --arg id "$new_track_id" \
-          '(.data // .).tracks[]? | select(.id == $id) | .status // "unknown"')
+    if ! poll_raw=$(mux assets get "$ASSET_ID" --json 2>"$poll_err"); then
+      echo
+      cat "$poll_err" >&2
+      echo "Error: could not fetch asset $ASSET_ID while waiting for track $new_track_id" >&2
+      echo "(see the mux error above). The track was created; check its status with:" >&2
+      echo "  mux assets get $ASSET_ID" >&2
+      exit 1
+    fi
+    if ! track_status=$(jq -r --arg id "$new_track_id" \
+        '(.data // .).tracks[]? | select(.id == $id) | .status // "unknown"' \
+        <<<"$poll_raw"); then
+      echo
+      echo "Error: could not parse the asset response while waiting for track $new_track_id." >&2
+      echo "Check its status with: mux assets get $ASSET_ID" >&2
+      exit 1
+    fi
+    [ -n "$track_status" ] || track_status="missing"
     case "$track_status" in
       ready)
         echo " ready."
@@ -207,13 +239,15 @@ if [ "$WAIT" -eq 1 ]; then
   done
   if [ "$track_status" != "ready" ]; then
     echo
-    echo "Still '$track_status' after ${WAIT_TIMEOUT}s — check again with:" >&2
+    echo "Error: track $new_track_id is still '$track_status' after ${WAIT_TIMEOUT}s." >&2
+    echo "It was created and may still finish ingesting; check again with:" >&2
     echo "  mux assets get $ASSET_ID" >&2
+    [ -n "$verify_url" ] && echo "Verify once ready: $verify_url" >&2
+    exit 1
   fi
 fi
 
-playback_id=$(jq -r '.playback_ids[0].id // empty' <<<"$asset")
-if [ -n "$playback_id" ]; then
+if [ -n "$verify_url" ]; then
   echo
-  echo "Verify: https://stream.mux.com/$playback_id/text/$new_track_id.vtt"
+  echo "Verify: $verify_url"
 fi
